@@ -1,0 +1,177 @@
+version: 3
+
+tasks:
+  clean:
+    desc: Clean
+    cmds:
+      - rm -rf dist
+
+  build:
+    desc: Build
+    cmds:
+      - goreleaser build --snapshot --clean
+      - eval `go-versioninfo env --git-describe-mode semver` && cd dist && zip -r mesn-cli_$VERSION.zip *
+
+  build-single:
+    desc: Build (single)
+    cmds:
+      - goreleaser build --snapshot --clean --single-target --output dist/mesn-cli
+
+  build-via-earthly:
+    cmds:
+      - eval `go-versioninfo env --git-describe-mode semver` && earthly --artifact +build/dist/* dist/output/ --VERSION=$VERSION --COMMIT=$COMMIT --COMMIT_TIMESTAMP=$COMMIT_TIMESTAMP
+
+  test:
+    desc: Test
+    deps: [ build-single ]
+    cmds:
+      - dist/mesn-cli verify config testdata/config/test.bin
+      - dist/mesn-cli verify config testdata/config/test.txt
+      - dist/mesn-cli verify config testdata/config/test.json
+      - dist/mesn-cli verify config testdata/config/test.yaml
+
+  test2:
+    desc: Test 2
+    deps: [ build-single ]
+    cmds:
+      - dist/mesn-cli bulk download
+          --start "2024-05-14 00:00:00"
+          --end "2024-05-15 00:00:00"
+          --sensor-class "TriOS OPUS"
+          --output-format csv
+    env:
+      MESN_PRIVATE: true
+      SSH_PROXY: samudra-portal-production
+
+  test3:
+    desc: Test 3
+    deps: [ build-single ]
+    cmds:
+      - dist/mesn-cli bulk download 
+          --start "2024-05-15 00:00:00"
+          --end "2024-05-16 00:00:00"
+          --sensor-class "TriOS OPUS"
+          --output-format merged-csv
+          --merged-quantity powerUsage
+          --merged-quantity NO3_scaled
+          --merged-quantity SQI_scaled
+          --merged-quantity UVT254_scaled
+          --merged-quantity SpectrumType
+          --merged-quantity Averaging
+          --merged-quantity CalFactor
+          --merged-quantity FlashCount
+          --merged-quantity PathLength
+          --merged-quantity Temperature
+    env:
+      MESN_PRIVATE: true
+      SSH_PROXY: samudra-portal-production
+
+  test4:
+    desc: Test 4
+    deps: [ build-single ]
+    cmds:
+      - dist/mesn-cli bulk download
+        --start "2024-05-15 00:00:00"
+        --end "2024-05-16 00:00:00"
+        --sensor-class "TriOS OPUS"
+        --output-format merged-jsonl
+        --merged-quantity powerUsage
+        --merged-quantity NO3_scaled
+        --merged-quantity SQI_scaled
+        --merged-quantity UVT254_scaled
+        --merged-quantity SpectrumType
+        --merged-quantity Averaging
+        --merged-quantity CalFactor
+        --merged-quantity FlashCount
+        --merged-quantity PathLength
+        --merged-quantity Temperature
+    env:
+      MESN_PRIVATE: true
+      SSH_PROXY: samudra-portal-production
+
+  test5:
+    desc: Test 5
+    deps: [ build-single ]
+    cmds:
+      - dist/mesn-cli schema quantities
+        --start "2024-06-11 00:00:00"
+        --end "2024-06-18 00:00:00"
+        --sensor-class "Doppler Current Profiler Sensor"
+    env:
+      MESN_PRIVATE: true
+      SSH_PROXY: samudra-portal-production
+
+  test6:
+    desc: Test 6
+    deps: [ build-single ]
+    cmds:
+      - dist/mesn-cli bulk download
+        --start "2024-06-11 00:00:00"
+        --end "2024-06-12 00:00:00"
+        --sensor-class "Doppler Current Profiler Sensor"
+        --output-format merged-csv
+    env:
+      MESN_PRIVATE: true
+      SSH_PROXY: samudra-portal-production
+
+  test7:
+    desc: Test 7
+    deps: [ build-single ]
+    cmds:
+      - dist/mesn-cli query get bulkData
+        --start "2024-02-02 00:00:00"
+        --end "2024-02-03 00:00:00"
+        --sensor-class sbe37
+        --output-format merged-csv
+    env:
+      MESN_PRIVATE: true
+      SSH_PROXY: samudra-portal-production
+
+  test7-1:
+    desc: Test 7-1
+    deps: [ build-single ]
+    cmds:
+      - dist/mesn-cli query get bulkData
+        --start "2024-04-01 00:00:00"
+        --end "2024-07-31 00:00:00"
+        --sensor-class "YSI EXO3"
+        --output-format merged-csv
+        --output-file YSI-EXO3.csv
+    env:
+      MESN_PRIVATE: true
+      SSH_PROXY: samudra-portal-production
+
+  test8:
+    desc: Test 8
+    deps: [ build-single ]
+    cmds:
+      - dist/mesn-cli query get aggregatedData
+        --start "2024-05-24 00:00:00"
+        --end "2024-05-25 00:00:00"
+        --sensor-class sbe37
+        --quantity conductivity
+        --output-format png
+        --open
+    env:
+      MESN_PRIVATE: true
+      SSH_PROXY: samudra-portal-production
+
+  test8-1:
+    desc: Test 8-1
+    deps: [ build-single ]
+    cmds:
+      - dist/mesn-cli query get aggregatedData
+        --start "2024-07-09 00:00:00"
+        --end "2024-07-10 00:00:00"
+        --sensor-class sbe37
+        --quantity conductivity
+    env:
+      MESN_PRIVATE: true
+      SSH_PROXY: samudra-portal-production
+
+  dependencyUpdates:
+    desc: Show dependency updates
+    cmds:
+      - go mod download
+      - go mod tidy
+      - go list -u -m -json all | go-mod-outdated -update -direct
