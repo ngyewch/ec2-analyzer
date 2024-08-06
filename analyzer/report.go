@@ -4,14 +4,14 @@ import "slices"
 
 type SecurityGroupReportEntry struct {
 	Descriptor      SecurityGroupDescriptor
-	UsedBy          []InstanceDescriptor
+	UsedBy          []Instance
 	ReferencedBy    []PortDescriptor
 	ReferenceErrors []SecurityGroupDescriptor
 }
 
-func (entry *SecurityGroupReportEntry) AddUsedBy(instanceDescriptor InstanceDescriptor) {
-	if !slices.Contains(entry.UsedBy, instanceDescriptor) {
-		entry.UsedBy = append(entry.UsedBy, instanceDescriptor)
+func (entry *SecurityGroupReportEntry) AddUsedBy(instance Instance) {
+	if !slices.Contains(entry.UsedBy, instance) {
+		entry.UsedBy = append(entry.UsedBy, instance)
 	}
 }
 

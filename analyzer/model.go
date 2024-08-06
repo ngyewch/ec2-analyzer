@@ -18,18 +18,6 @@ func toSecurityGroupDescriptor(securityGroup types.SecurityGroup) SecurityGroupD
 	}
 }
 
-type InstanceDescriptor struct {
-	InstanceId   string
-	InstanceName string
-}
-
-func toInstanceDescriptor(instance types.Instance) InstanceDescriptor {
-	return InstanceDescriptor{
-		InstanceId:   *instance.InstanceId,
-		InstanceName: getTagByName(instance.Tags, "Name"),
-	}
-}
-
 type PortDescriptor struct {
 	DeclaredBy SecurityGroupDescriptor
 	Source     SecurityGroupDescriptor
@@ -75,4 +63,42 @@ func (descriptors PortDescriptors) String() string {
 		parts = append(parts, descriptor.String())
 	}
 	return strings.Join(parts, ", ")
+}
+
+type TrafficDescriptor struct {
+	IpProtocol string
+	FromPort   *int32
+	ToPort     *int32
+}
+
+func toTrafficDescriptor(ipPermission types.IpPermission) TrafficDescriptor {
+	return TrafficDescriptor{
+		IpProtocol: *ipPermission.IpProtocol,
+		FromPort:   ipPermission.FromPort,
+		ToPort:     ipPermission.ToPort,
+	}
+}
+
+func (descriptor TrafficDescriptor) String() string {
+	var s string
+	if descriptor.IpProtocol == "-1" {
+		s += "All traffic"
+	} else {
+		s += descriptor.IpProtocol
+	}
+	s += "/"
+	if (descriptor.FromPort == nil) || (descriptor.ToPort == nil) {
+		s += "*"
+	} else if *descriptor.FromPort != *descriptor.ToPort {
+		s += fmt.Sprintf("%d-%d", *descriptor.FromPort, *descriptor.ToPort)
+	} else {
+		s += fmt.Sprintf("%d", *descriptor.FromPort)
+	}
+	return s
+}
+
+type InboundRule struct {
+	DeclaredBy        types.SecurityGroup
+	TrafficDescriptor TrafficDescriptor
+	Description       string
 }

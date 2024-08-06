@@ -37,6 +37,6 @@ func doRun(cCtx *cli.Context) error {
 	ec2Service := ec2.NewFromConfig(cfg)
 	rdsService := rds.NewFromConfig(cfg)
 
-	a := analyzer.New(ec2Service, rdsService)
+	a := analyzer.NewAnalyzer(ec2Service, rdsService)
 	return a.Analyze(cCtx.Context)
 }
