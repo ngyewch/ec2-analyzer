@@ -17,33 +17,6 @@ func toSecurityGroupDescriptor(securityGroup types.SecurityGroup) SecurityGroupD
 	}
 }
 
-type PortDescriptor struct {
-	DeclaredBy SecurityGroupDescriptor
-	Source     SecurityGroupDescriptor
-	IpProtocol string
-	FromPort   *int32
-	ToPort     *int32
-}
-
-func (descriptor PortDescriptor) String() string {
-	var s string
-	if descriptor.IpProtocol == "-1" {
-		s += "All traffic"
-	} else {
-		s += descriptor.IpProtocol
-	}
-	s += "/"
-	if (descriptor.FromPort == nil) || (descriptor.ToPort == nil) {
-		s += "*"
-	} else if *descriptor.FromPort != *descriptor.ToPort {
-		s += fmt.Sprintf("%d-%d", *descriptor.FromPort, *descriptor.ToPort)
-	} else {
-		s += fmt.Sprintf("%d", *descriptor.FromPort)
-	}
-	s += fmt.Sprintf(" (%s)", descriptor.DeclaredBy.GroupName)
-	return s
-}
-
 type TrafficDescriptor struct {
 	IpProtocol string
 	FromPort   *int32
@@ -94,4 +67,10 @@ func toRule(ruleType string, securityGroupDescriptor SecurityGroupDescriptor, ip
 
 func (rule Rule) String() string {
 	return fmt.Sprintf("[%s] %s (%s)", rule.Type, rule.TrafficDescriptor, rule.DeclaredBy.GroupName)
+}
+
+type Connection struct {
+	Rule                Rule
+	Source              Instance
+	SourceSecurityGroup types.SecurityGroup
 }

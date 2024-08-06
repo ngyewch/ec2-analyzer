@@ -44,11 +44,23 @@ func (analyzer *Analyzer) Analyze(ctx context.Context) error {
 	}
 
 	analyzer.securityGroupReportEntryMap = make(map[SecurityGroupDescriptor]*SecurityGroupReportEntry)
-	//connectionMap := make(map[Instance][]Rule)
+	connectionMap := make(map[Instance][]Connection)
 	for _, securityGroup := range analyzer.securityGroupMap {
 		securityGroupReportEntry := analyzer.getSecurityGroupReportEntry(securityGroup)
-		analyzer.processIpPermissions(securityGroupReportEntry, "inbound", securityGroup.IpPermissions)
-		analyzer.processIpPermissions(securityGroupReportEntry, "outbound", securityGroup.IpPermissionsEgress)
+		analyzer.processIpPermissions(securityGroupReportEntry, "inbound", securityGroup.IpPermissions, func(rule Rule, sourceSecurityGroup types.SecurityGroup) {
+			instances := analyzer.getInstancesWithSecurityGroup(rule.DeclaredBy.GroupId)
+			sourceInstances := analyzer.getInstancesWithSecurityGroup(*sourceSecurityGroup.GroupId)
+			for _, instance := range instances {
+				for _, sourceInstance := range sourceInstances {
+					connectionMap[instance] = append(connectionMap[instance], Connection{
+						Rule:                rule,
+						Source:              sourceInstance,
+						SourceSecurityGroup: sourceSecurityGroup,
+					})
+				}
+			}
+		})
+		analyzer.processIpPermissions(securityGroupReportEntry, "outbound", securityGroup.IpPermissionsEgress, nil)
 	}
 
 	for _, instance := range analyzer.instances {
@@ -100,10 +112,36 @@ func (analyzer *Analyzer) Analyze(ctx context.Context) error {
 		fmt.Println()
 	}
 
+	fmt.Println("----------------")
+
+	var instances []Instance
+	for instance, _ := range connectionMap {
+		instances = append(instances, instance)
+	}
+	slices.SortFunc(instances, func(a Instance, b Instance) int {
+		return cmp.Or(
+			cmp.Compare(a.Type(), b.Type()),
+			cmp.Compare(a.Name(), b.Name()),
+			cmp.Compare(a.Id(), b.Id()),
+		)
+	})
+	for _, instance := range instances {
+		connections := connectionMap[instance]
+		slices.SortFunc(connections, func(a Connection, b Connection) int {
+			return cmp.Or(
+				cmp.Compare(a.Source.String(), b.Source.String()),
+				cmp.Compare(a.Rule.String(), b.Rule.String()),
+			)
+		})
+		for _, connection := range connections {
+			fmt.Printf("%s <- %s: %s [%s]\n", instance.String(), connection.Source.String(), connection.Rule, *connection.SourceSecurityGroup.GroupName)
+		}
+	}
+
 	return nil
 }
 
-func (analyzer *Analyzer) processIpPermissions(securityGroupReportEntry *SecurityGroupReportEntry, ruleType string, ipPermissions []types.IpPermission) {
+func (analyzer *Analyzer) processIpPermissions(securityGroupReportEntry *SecurityGroupReportEntry, ruleType string, ipPermissions []types.IpPermission, ruleHandler func(rule Rule, sourceSecurityGroup types.SecurityGroup)) {
 	for _, ipPermission := range ipPermissions {
 		// TODO IpRanges, Ipv6Ranges, PrefixListIds
 		for _, userIdGroupPair := range ipPermission.UserIdGroupPairs {
@@ -117,6 +155,9 @@ func (analyzer *Analyzer) processIpPermissions(securityGroupReportEntry *Securit
 				rule := toRule(ruleType, securityGroupReportEntry.Descriptor, ipPermission, userIdGroupPair)
 				sourceSecurityGroupReportEntry := analyzer.getSecurityGroupReportEntry(sourceSecurityGroup)
 				sourceSecurityGroupReportEntry.AddReferencedBy(rule)
+				if ruleHandler != nil {
+					ruleHandler(rule, sourceSecurityGroup)
+				}
 			}
 		}
 	}
