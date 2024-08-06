@@ -1,11 +1,13 @@
 package analyzer
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
+	"slices"
 )
 
 type Analyzer struct {
@@ -42,68 +44,58 @@ func (analyzer *Analyzer) Analyze(ctx context.Context) error {
 	}
 
 	analyzer.securityGroupReportEntryMap = make(map[SecurityGroupDescriptor]*SecurityGroupReportEntry)
+	//connectionMap := make(map[Instance][]Rule)
 	for _, securityGroup := range analyzer.securityGroupMap {
-		securityGroupDescriptor := toSecurityGroupDescriptor(securityGroup)
-		securityGroupReportEntry := analyzer.getSecurityGroupReportEntry(securityGroupDescriptor)
-
-		for _, ipPermission := range securityGroup.IpPermissions {
-			// TODO IpRanges, Ipv6Ranges, PrefixListIds
-			for _, userIdGroupPair := range ipPermission.UserIdGroupPairs {
-				sourceSecurityGroup, ok := analyzer.securityGroupMap[*userIdGroupPair.GroupId]
-				if !ok {
-					securityGroupReportEntry.AddReferenceError(SecurityGroupDescriptor{
-						GroupId:   *userIdGroupPair.GroupId,
-						GroupName: *userIdGroupPair.GroupName,
-					})
-				} else {
-					sourceSecurityGroupDescriptor := toSecurityGroupDescriptor(sourceSecurityGroup)
-					portDescriptor := toPortDescriptor(securityGroup, sourceSecurityGroup, ipPermission)
-
-					sourceSecurityGroupReportEntry := analyzer.getSecurityGroupReportEntry(sourceSecurityGroupDescriptor)
-					sourceSecurityGroupReportEntry.AddReferencedBy(portDescriptor)
-				}
-			}
-		}
+		securityGroupReportEntry := analyzer.getSecurityGroupReportEntry(securityGroup)
+		analyzer.processIpPermissions(securityGroupReportEntry, "inbound", securityGroup.IpPermissions)
+		analyzer.processIpPermissions(securityGroupReportEntry, "outbound", securityGroup.IpPermissionsEgress)
 	}
 
 	for _, instance := range analyzer.instances {
-		connectionMap := make(map[string][]PortDescriptor)
 		for _, securityGroupId := range instance.SecurityGroupIds() {
 			securityGroup, ok := analyzer.securityGroupMap[securityGroupId]
 			if !ok {
 				continue
 			}
-
-			securityGroupDescriptor := toSecurityGroupDescriptor(securityGroup)
-			securityGroupReportEntry := analyzer.getSecurityGroupReportEntry(securityGroupDescriptor)
+			securityGroupReportEntry := analyzer.getSecurityGroupReportEntry(securityGroup)
 			securityGroupReportEntry.AddUsedBy(instance)
-
-			for _, ipPermission := range securityGroup.IpPermissions {
-				// TODO IpRanges, Ipv6Ranges, PrefixListIds
-				for _, userIdGroupPair := range ipPermission.UserIdGroupPairs {
-					sourceSecurityGroup, ok := analyzer.securityGroupMap[*userIdGroupPair.GroupId]
-					if !ok {
-						continue
-					}
-					portDescriptor := toPortDescriptor(securityGroup, sourceSecurityGroup, ipPermission)
-					fromInstances := analyzer.getInstancesWithSecurityGroup(*userIdGroupPair.GroupId)
-					for _, fromInstance := range fromInstances {
-						connectionMap[fromInstance.Id()] = append(connectionMap[fromInstance.Id()], portDescriptor)
-					}
-				}
-			}
 		}
 	}
 
+	var securityGroupReportEntries []*SecurityGroupReportEntry
 	for _, securityGroupReportEntry := range analyzer.securityGroupReportEntryMap {
+		securityGroupReportEntries = append(securityGroupReportEntries, securityGroupReportEntry)
+	}
+	slices.SortFunc(securityGroupReportEntries, func(a *SecurityGroupReportEntry, b *SecurityGroupReportEntry) int {
+		return cmp.Compare(a.Descriptor.GroupName, b.Descriptor.GroupName)
+	})
+	for _, securityGroupReportEntry := range securityGroupReportEntries {
 		fmt.Printf("[%s %s]\n", securityGroupReportEntry.Descriptor.GroupId, securityGroupReportEntry.Descriptor.GroupName)
-		fmt.Println("Used by:")
-		for _, usedBy := range securityGroupReportEntry.UsedBy {
-			fmt.Printf("- %s\n", usedBy)
+		if len(securityGroupReportEntry.UsedBy) > 0 {
+			fmt.Println("Used by:")
+			slices.SortFunc(securityGroupReportEntry.UsedBy, func(a Instance, b Instance) int {
+				return cmp.Or(
+					cmp.Compare(a.Type(), b.Type()),
+					cmp.Compare(a.Name(), b.Name()),
+					cmp.Compare(a.Id(), b.Id()),
+				)
+			})
+			for _, usedBy := range securityGroupReportEntry.UsedBy {
+				fmt.Printf("- %s\n", usedBy)
+			}
 		}
-		fmt.Println("Referenced by:")
-		for _, referencedBy := range securityGroupReportEntry.ReferencedBy {
-			fmt.Printf("- %s\n", referencedBy)
+		if len(securityGroupReportEntry.ReferencedBy) > 0 {
+			fmt.Println("Referenced by:")
+			slices.SortFunc(securityGroupReportEntry.ReferencedBy, func(a Rule, b Rule) int {
+				return cmp.Or(
+					cmp.Compare(a.Type, b.Type),
+					cmp.Compare(a.TrafficDescriptor.String(), b.TrafficDescriptor.String()),
+					cmp.Compare(a.DeclaredBy.GroupName, b.DeclaredBy.GroupName),
+				)
+			})
+			for _, referencedBy := range securityGroupReportEntry.ReferencedBy {
+				fmt.Printf("- %s\n", referencedBy)
+			}
 		}
 		fmt.Println()
 	}
@@ -111,11 +103,32 @@ func (analyzer *Analyzer) Analyze(ctx context.Context) error {
 	return nil
 }
 
-func (analyzer *Analyzer) getSecurityGroupReportEntry(securityGroupDescriptor SecurityGroupDescriptor) *SecurityGroupReportEntry {
+func (analyzer *Analyzer) processIpPermissions(securityGroupReportEntry *SecurityGroupReportEntry, ruleType string, ipPermissions []types.IpPermission) {
+	for _, ipPermission := range ipPermissions {
+		// TODO IpRanges, Ipv6Ranges, PrefixListIds
+		for _, userIdGroupPair := range ipPermission.UserIdGroupPairs {
+			sourceSecurityGroup, ok := analyzer.securityGroupMap[*userIdGroupPair.GroupId]
+			if !ok {
+				securityGroupReportEntry.AddReferenceError(SecurityGroupDescriptor{
+					GroupId:   *userIdGroupPair.GroupId,
+					GroupName: *userIdGroupPair.GroupName,
+				})
+			} else {
+				rule := toRule(ruleType, securityGroupReportEntry.Descriptor, ipPermission, userIdGroupPair)
+				sourceSecurityGroupReportEntry := analyzer.getSecurityGroupReportEntry(sourceSecurityGroup)
+				sourceSecurityGroupReportEntry.AddReferencedBy(rule)
+			}
+		}
+	}
+}
+
+func (analyzer *Analyzer) getSecurityGroupReportEntry(securityGroup types.SecurityGroup) *SecurityGroupReportEntry {
+	securityGroupDescriptor := toSecurityGroupDescriptor(securityGroup)
 	securityGroupReportEntry, ok := analyzer.securityGroupReportEntryMap[securityGroupDescriptor]
 	if !ok {
 		securityGroupReportEntry = &SecurityGroupReportEntry{
-			Descriptor: securityGroupDescriptor,
+			SecurityGroup: securityGroup,
+			Descriptor:    securityGroupDescriptor,
 		}
 		analyzer.securityGroupReportEntryMap[securityGroupDescriptor] = securityGroupReportEntry
 	}

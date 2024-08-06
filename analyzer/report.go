@@ -1,11 +1,15 @@
 package analyzer
 
-import "slices"
+import (
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"slices"
+)
 
 type SecurityGroupReportEntry struct {
+	SecurityGroup   types.SecurityGroup
 	Descriptor      SecurityGroupDescriptor
 	UsedBy          []Instance
-	ReferencedBy    []PortDescriptor
+	ReferencedBy    []Rule
 	ReferenceErrors []SecurityGroupDescriptor
 }
 
@@ -15,9 +19,9 @@ func (entry *SecurityGroupReportEntry) AddUsedBy(instance Instance) {
 	}
 }
 
-func (entry *SecurityGroupReportEntry) AddReferencedBy(portDescriptor PortDescriptor) {
-	if !slices.Contains(entry.ReferencedBy, portDescriptor) {
-		entry.ReferencedBy = append(entry.ReferencedBy, portDescriptor)
+func (entry *SecurityGroupReportEntry) AddReferencedBy(rule Rule) {
+	if !slices.Contains(entry.ReferencedBy, rule) {
+		entry.ReferencedBy = append(entry.ReferencedBy, rule)
 	}
 }
 
